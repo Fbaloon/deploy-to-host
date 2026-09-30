@@ -1,0 +1,23 @@
+# Gradle 构建产物与缓存
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IntelliJ Platform 下载的 IDE 发行包（体积可达数百 MB）
+.intellijPlatform/
+
+# IntelliJ IDEA 本地配置
+.idea/
+*.iml
+
+# Eclipse / Buildship 生成的文件（本项目由 Gradle 构建，不使用 Eclipse）
+.project
+.settings/
+
+# 构建与运行日志
+*.log
+
+# 操作系统产生的杂项文件
+.DS_Store
+Thumbs.db
+desktop.ini

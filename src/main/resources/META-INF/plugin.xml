@@ -1,0 +1,59 @@
+<idea-plugin>
+    <id>com.hql.maven-quick-deploy</id>
+    <name>Deploy to Host</name>
+    <vendor>hql</vendor>
+
+    <description><![CDATA[
+    Build and deploy artifacts or frontend resources to remote hosts.
+    <ul>
+      <li>一键打包 / 一键发布，支持 Maven 多模块项目与前端目录上传</li>
+      <li>上传本地指定目录或文件到配置好的服务器目录，支持排除规则</li>
+      <li>上传完成后可选执行服务器上的重启脚本或命令</li>
+      <li>支持配置多台服务器并复用为部署配置</li>
+      <li>发布流程分阶段快速失败：预检 → 构建 → 暂存上传 → 原子切换 → 重启，任一阶段失败立即中止</li>
+      <li>所有文件先落到远端暂存目录，最后单条 mv 原子生效，失败时线上目录保持原样</li>
+    </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <!-- Maven 工具窗口 group 属于 Maven 插件，可选依赖：未装 Maven 插件时仅隐藏该入口 -->
+    <depends optional="true" config-file="maven-quick-deploy-maven.xml">org.jetbrains.idea.maven</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationService
+                serviceImplementation="com.hql.deployer.config.ServerProfileService"/>
+        <applicationConfigurable
+                parentId="tools"
+                id="com.hql.deployer.settings"
+                displayName="Deploy to Host"
+                icon="/icons/deployToHost.svg"
+                instance="com.hql.deployer.ui.DeployConfigurable"/>
+        <toolWindow
+                id="Deploy to Host"
+                anchor="right"
+                icon="/icons/deployToHost.svg"
+                factoryClass="com.hql.deployer.ui.QuickDeployToolWindowFactory"/>
+        <programRunner
+                implementation="com.hql.deployer.runconfig.MavenDeployProgramRunner"/>
+        <notificationGroup
+                id="Deploy to Host"
+                displayType="BALLOON"/>
+        <!--
+          configurationType 必须注册在 com.intellij.configurationType 扩展点下。
+          写成 plugin.xml 顶层元素会被 PluginParser 报 "Unknown element" 并静默丢弃，
+          表现为 Run/Debug Configurations 的 + 列表里找不到本配置类型。
+        -->
+        <configurationType
+                implementation="com.hql.deployer.runconfig.MavenDeployConfigurationType"/>
+    </extensions>
+
+    <actions>
+        <action id="MavenQuickDeploy.PackageModule"
+                class="com.hql.deployer.action.PackageModuleAction"
+                text="打包选中模块"
+                icon="/icons/deployToHost.svg"
+                description="使用 Maven 对选中模块执行打包">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>

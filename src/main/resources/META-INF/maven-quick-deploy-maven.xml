@@ -1,0 +1,16 @@
+<idea-plugin>
+    <!--
+      仅在 org.jetbrains.idea.maven（Maven）插件存在时加载。
+      Maven.NavigatorActionsToolbar 是 2026.2 中 Maven 工具窗口的 group id；
+      旧版 IDEA 的 MavenProjectsViewToolbar 已不存在，引用它会抛 PluginException。
+    -->
+    <actions>
+        <action id="MavenQuickDeploy.PackageModuleInMavenView"
+                class="com.hql.deployer.action.PackageModuleAction"
+                text="打包选中模块"
+                icon="/icons/deployToHost.svg"
+                description="使用 Maven 对选中模块执行打包">
+            <add-to-group group-id="Maven.NavigatorActionsToolbar" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
