@@ -28,11 +28,6 @@
                 displayName="Deploy to Host"
                 icon="/icons/deployToHost.svg"
                 instance="com.hql.deployer.ui.DeployConfigurable"/>
-        <toolWindow
-                id="Deploy to Host"
-                anchor="right"
-                icon="/icons/deployToHost.svg"
-                factoryClass="com.hql.deployer.ui.QuickDeployToolWindowFactory"/>
         <programRunner
                 implementation="com.hql.deployer.runconfig.MavenDeployProgramRunner"/>
         <notificationGroup
