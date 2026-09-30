@@ -99,19 +99,6 @@ public final class MavenDeployRunConfiguration extends LocatableConfigurationBas
 
     @Override
     public void writeExternal(@NotNull Element element) {
-        if (Boolean.getBoolean("mavenDeploy.rcDiag")) {
-            StringBuilder sb = new StringBuilder("[rc-diag] writeExternal id=")
-                    .append(System.identityHashCode(this))
-                    .append(" goals=").append(options.mavenGoals)
-                    .append(" hostIds=").append(options.hostIds.replace('\n', '|'))
-                    .append(" targetDir=").append(options.targetDirectory)
-                    .append('\n');
-            StackTraceElement[] st = Thread.currentThread().getStackTrace();
-            for (int i = 3; i < Math.min(24, st.length); i++) {
-                sb.append("    at ").append(st[i]).append('\n');
-            }
-            System.out.println(sb);
-        }
         XmlSerializer.serializeInto(options, element);
     }
 

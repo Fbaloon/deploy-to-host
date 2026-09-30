@@ -103,32 +103,11 @@ public final class MavenDeployConfigurationEditor extends SettingsEditor<MavenDe
 
     @Override
     protected void applyEditorTo(@NotNull MavenDeployRunConfiguration configuration) {
-        if (Boolean.getBoolean("mavenDeploy.rcDiag")) {
-            StringBuilder sb = new StringBuilder("[rc-diag] applyEditorTo id=")
-                    .append(System.identityHashCode(configuration))
-                    .append(" goals=").append(configuration.getDeployOptions().mavenGoals)
-                    .append('\n');
-            StackTraceElement[] st = Thread.currentThread().getStackTrace();
-            for (int i = 3; i < Math.min(24, st.length); i++) {
-                sb.append("    at ").append(st[i]).append('\n');
-            }
-            System.out.println(sb);
-        }
         copyUiToConfiguration(configuration);
     }
 
     @Override
     public void checkEditorData(MavenDeployRunConfiguration configuration) {
-        if (Boolean.getBoolean("mavenDeploy.rcDiag")) {
-            StringBuilder sb = new StringBuilder("[rc-diag] checkEditorData id=")
-                    .append(System.identityHashCode(configuration))
-                    .append('\n');
-            StackTraceElement[] st = Thread.currentThread().getStackTrace();
-            for (int i = 3; i < Math.min(24, st.length); i++) {
-                sb.append("    at ").append(st[i]).append('\n');
-            }
-            System.out.println(sb);
-        }
         copyUiToConfiguration(configuration);
     }
 

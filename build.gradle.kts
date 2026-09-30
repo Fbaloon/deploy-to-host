@@ -54,11 +54,6 @@ tasks {
         options.encoding = "UTF-8"
     }
 
-    runIde {
-        // 临时诊断开关：复现「不点 OK/Apply 关闭仍保存」，抓调用栈；验证后移除
-        jvmArgs("-DmavenDeploy.rcDiag=true")
-    }
-
     test {
         useJUnitPlatform()
     }
