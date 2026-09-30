@@ -10,7 +10,9 @@ import com.intellij.execution.ui.ExecutionConsole;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
-import com.intellij.ui.JBColor;
+import com.intellij.openapi.editor.colors.EditorColorsManager;
+import com.intellij.openapi.editor.colors.EditorColorsScheme;
+import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.ui.components.JBScrollPane;
 import org.jetbrains.annotations.NotNull;
 
@@ -31,6 +33,10 @@ import java.awt.Font;
  * <p>自实现 {@link ExecutionConsole} 而非复用平台控制台：部署输出是「一次性、带时间戳、
  * 按级别着色」的文本流，用轻量组件渲染更可控，也避免依赖 {@code impl} 包下的内部类。</p>
  *
+ * <p>样式统一跟随 IDE 主题：背景来自全局配色的控制台背景，文字颜色取自平台标准
+ * {@link ConsoleViewContentType}（与 Run/Gradle 控制台同源），字体使用编辑器等宽字体。
+ * 这样无论浅色还是深色主题，控制台都与 IDE 自身观感一致。</p>
+ *
  * <p>所有回调都来自后台线程，因此统一通过 {@link #append} 切回 EDT 后再操作文档。</p>
  *
  * @author hql on 2026/9/28
@@ -43,13 +49,25 @@ public final class DeployLogConsole implements ExecutionConsole, Disposable {
     private final JTextPane area = new JTextPane();
     private final JPanel root = new JPanel(new BorderLayout());
     private final String title;
+    /** 主题决定的字体家族；NULL 时退回系统等宽字 */
+    private final String consoleFontFamily;
+    /** 主题决定的字体大小 */
+    private final int consoleFontSize;
 
     public DeployLogConsole(@NotNull String title) {
         this.title = title;
+        EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
+        Color background = scheme.getColor(ConsoleViewContentType.CONSOLE_BACKGROUND_KEY);
+        Color foreground = scheme.getDefaultForeground();
+        String fontFamily = scheme.getEditorFontName();
+        int fontSize = scheme.getEditorFontSize();
+
         area.setEditable(false);
-        area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-        area.setBackground(new JBColor(new Color(0x2B2B2B), new Color(0x2B2B2B)));
-        area.setForeground(new JBColor(new Color(0xBBBBBB), new Color(0xBBBBBB)));
+        consoleFontFamily = fontFamily == null || fontFamily.isBlank() ? Font.MONOSPACED : fontFamily;
+        consoleFontSize = fontSize > 0 ? fontSize : 12;
+        area.setFont(new Font(consoleFontFamily, Font.PLAIN, consoleFontSize));
+        area.setBackground(background != null ? background : scheme.getDefaultBackground());
+        area.setForeground(foreground);
         JBScrollPane scrollPane = new JBScrollPane(area);
         scrollPane.setBorder(null);
         root.add(scrollPane, BorderLayout.CENTER);
@@ -145,9 +163,10 @@ public final class DeployLogConsole implements ExecutionConsole, Disposable {
     private void insert(@NotNull String line, @NotNull Level level) {
         StyledDocument document = area.getStyledDocument();
         SimpleAttributeSet attributes = new SimpleAttributeSet();
-        StyleConstants.setForeground(attributes, level.color());
-        StyleConstants.setFontFamily(attributes, Font.MONOSPACED);
-        StyleConstants.setFontSize(attributes, 12);
+        StyleConstants.setForeground(attributes, level.foreground(consoleFontFamily, consoleFontSize));
+        StyleConstants.setBold(attributes, level.bold());
+        StyleConstants.setFontFamily(attributes, consoleFontFamily);
+        StyleConstants.setFontSize(attributes, consoleFontSize);
         try {
             document.insertString(document.getLength(), line + "\n", attributes);
             area.setCaretPosition(document.getLength());
@@ -169,25 +188,40 @@ public final class DeployLogConsole implements ExecutionConsole, Disposable {
 
     /**
      * 日志着色级别。
+     *
+     * <p>颜色全部映射到平台标准 {@link ConsoleViewContentType}，随 IDE 主题自动适配；
+     * 不再自造色值，保证与 Run 工具窗里其它控制台观感统一。</p>
      */
     public enum Level {
-        INFO(JBColor.GRAY),
-        COMMAND(new JBColor(new Color(0x2A7), new Color(0x2A7))),
-        SUCCESS(new JBColor(new Color(0x3C9), new Color(0x3C9))),
-        WARN(new JBColor(new Color(0xC90), new Color(0xC90))),
-        ERROR(new JBColor(new Color(0xC55), new Color(0xC55))),
-        /** 阶段小节标题：加粗，不带时间戳 */
-        SECTION(new JBColor(new Color(0xDDD), new Color(0xDDD)));
+        INFO(ConsoleViewContentType.NORMAL_OUTPUT, false),
+        COMMAND(ConsoleViewContentType.SYSTEM_OUTPUT, false),
+        SUCCESS(ConsoleViewContentType.NORMAL_OUTPUT, true),
+        WARN(ConsoleViewContentType.LOG_WARNING_OUTPUT, false),
+        ERROR(ConsoleViewContentType.ERROR_OUTPUT, false),
+        /** 阶段小节标题：粗体，不带时间戳 */
+        SECTION(ConsoleViewContentType.NORMAL_OUTPUT, true);
 
-        private final Color color;
+        private final ConsoleViewContentType contentType;
+        private final boolean bold;
 
-        Level(@NotNull Color color) {
-            this.color = color;
+        Level(@NotNull ConsoleViewContentType contentType, boolean bold) {
+            this.contentType = contentType;
+            this.bold = bold;
         }
 
+        /**
+         * 解析该级别在当前主题下的前景色。配置缺省时退回全局默认前景色。
+         */
         @NotNull
-        Color color() {
-            return color;
+        Color foreground(@NotNull String fontFamily, int fontSize) {
+            EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
+            TextAttributes attributes = scheme.getAttributes(contentType.getAttributesKey(), true);
+            Color color = attributes == null ? null : attributes.getForegroundColor();
+            return color != null ? color : scheme.getDefaultForeground();
+        }
+
+        boolean bold() {
+            return bold;
         }
     }
 }

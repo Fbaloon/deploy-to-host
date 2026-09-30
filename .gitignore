@@ -17,6 +17,13 @@ build/
 # 构建与运行日志
 *.log
 
+# AI 编码工具的本地会话数据
+.opencode/
+
+# 图标设计与调试过程中产生的临时预览图
+icon-preview.png
+ref-zoom.png
+
 # 操作系统产生的杂项文件
 .DS_Store
 Thumbs.db

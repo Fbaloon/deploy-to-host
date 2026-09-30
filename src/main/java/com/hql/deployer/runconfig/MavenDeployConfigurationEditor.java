@@ -11,22 +11,33 @@ import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
-import com.intellij.ui.CheckBoxList;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
+import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.FormBuilder;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.AbstractAction;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
+import javax.swing.KeyStroke;
+import javax.swing.table.AbstractTableModel;
+import java.awt.BorderLayout;
+import java.awt.Cursor;
+import java.awt.FlowLayout;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 「部署到服务器」配置的编辑面板。
@@ -55,9 +66,11 @@ public final class MavenDeployConfigurationEditor extends SettingsEditor<MavenDe
     private final JBTextField chmodField = new JBTextField();
 
     /**
-     * 目标主机多选。每行一个 {@link ServerProfile}，勾选即代表一次部署目标。
+     * 目标主机多选，用多列表格展示：勾选列 + 名称/主机/端口/用户名/远端目录。
+     * 服务器多时也能一眼分辨每台服务器的地址与归属，勾选即代表一次部署目标。
      */
-    private final CheckBoxList<ServerProfile> hostList = new CheckBoxList<>();
+    private final HostTableModel hostTableModel = new HostTableModel();
+    private final JBTable hostTable = new JBTable(hostTableModel);
     private final JBTextField targetDirectoryField = new JBTextField();
     private final JBLabel resolvedTargetLabel = new JBLabel();
 
@@ -129,7 +142,7 @@ public final class MavenDeployConfigurationEditor extends SettingsEditor<MavenDe
         o.excludes = excludesField.getText().trim();
         o.chmod = chmodField.getText().trim();
 
-        List<ServerProfile> hosts = hostList.getCheckedItems();
+        List<ServerProfile> hosts = hostTableModel.getCheckedServers();
         StringBuilder ids = new StringBuilder();
         for (ServerProfile host : hosts) {
             if (ids.length() > 0) {
@@ -154,9 +167,44 @@ public final class MavenDeployConfigurationEditor extends SettingsEditor<MavenDe
             updateEnabledState();
             fireEditorStateChanged();
         });
-        hostList.setCheckBoxListListener((index, value) -> {
-            updateResolvedTarget();
-            fireEditorStateChanged();
+        // 表格：单击勾选列或按空格即切换该行选中
+        hostTable.setRowHeight(22);
+        hostTable.setShowGrid(false);
+        hostTable.setStriped(true);
+        hostTable.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
+        hostTable.getColumnModel().getColumn(0).setMaxWidth(36);
+        hostTable.getColumnModel().getColumn(0).setResizable(false);
+        // 预设列宽：主机地址与远端目录按内容量给足宽度，配合不自动压缩，
+        // 保证多服务器时每台的地址、用户名、目录都能完整看清楚
+        int[] columnWidths = {36, 110, 190, 56, 90, 240};
+        for (int i = 0; i < columnWidths.length; i++) {
+            hostTable.getColumnModel().getColumn(i).setPreferredWidth(columnWidths[i]);
+        }
+        hostTable.setAutoResizeMode(javax.swing.JTable.AUTO_RESIZE_OFF);
+        hostTable.setFillsViewportHeight(true);
+        hostTable.getEmptyText().setText("暂无服务器，请到 设置 → 工具 → Deploy to Host 添加");
+        hostTable.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                int col = hostTable.columnAtPoint(e.getPoint());
+                int row = hostTable.rowAtPoint(e.getPoint());
+                if (col == 0 && row >= 0) {
+                    hostTableModel.toggle(row);
+                    onHostSelectionChanged();
+                }
+            }
+        });
+        hostTable.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0), "toggleHostChecked");
+        hostTable.getActionMap().put("toggleHostChecked", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                int row = hostTable.getSelectedRow();
+                if (row >= 0) {
+                    hostTableModel.toggle(row);
+                    onHostSelectionChanged();
+                }
+            }
         });
         targetDirectoryField.getDocument().addDocumentListener(
                 new SimpleDocumentListener(() -> {
@@ -185,9 +233,19 @@ public final class MavenDeployConfigurationEditor extends SettingsEditor<MavenDe
         JTextField moduleEditor = (JTextField) moduleCombo.getEditor().getEditorComponent();
         moduleEditor.getDocument().addDocumentListener(new SimpleDocumentListener(this::fireEditorStateChanged));
 
-        JScrollPane hostScroll = new JScrollPane(hostList);
-        hostScroll.setPreferredSize(new java.awt.Dimension(0, 96));
+        JScrollPane hostScroll = new JScrollPane(hostTable);
+        // 最小高度兜底：表单其它字段再高，也不会把服务器表格压到看不清
+        hostScroll.setPreferredSize(new java.awt.Dimension(0, 220));
+        hostScroll.setMinimumSize(new java.awt.Dimension(0, 220));
         hostScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+
+        // 「目标主机」标题行右侧提供「全选 / 全不选」，服务器多时免去逐行勾选
+        JPanel hostHeader = new JPanel(new BorderLayout());
+        hostHeader.add(new JBLabel("<html><b>目标主机</b></html>"), BorderLayout.WEST);
+        JPanel hostLinks = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+        hostLinks.add(createLinkLabel("全选", this::selectAllHosts));
+        hostLinks.add(createLinkLabel("全不选", this::clearAllHosts));
+        hostHeader.add(hostLinks, BorderLayout.EAST);
 
         JPanel contentPanel = FormBuilder.createFormBuilder()
                 // ---------- 部署内容 ----------
@@ -203,8 +261,9 @@ public final class MavenDeployConfigurationEditor extends SettingsEditor<MavenDe
                 .addLabeledComponent("远端权限:", chmodField, 1, false)
                 // ---------- 目标主机 ----------
                 .addSeparator()
-                .addComponent(new JBLabel("<html><b>目标主机</b></html>"))
-                .addLabeledComponent("服务器:", hostScroll, 1, false)
+                .addComponent(hostHeader)
+                // 表格区域吃掉面板的全部垂直余量：对话框越大，能同时看到的服务器越多
+                .addComponentFillVertically(hostScroll, 0)
                 .addLabeledComponent("目标目录:", targetDirectoryField, 1, false)
                 .addComponentToRightColumn(resolvedTargetLabel, 0)
                 // ---------- 上传前命令 ----------
@@ -220,10 +279,11 @@ public final class MavenDeployConfigurationEditor extends SettingsEditor<MavenDe
                 .addComponent(new JBLabel("<html><b>高级</b></html>"))
                 .addComponentToRightColumn(stagingCheck, 0)
                 .addLabeledComponent("构建超时(毫秒):", packageTimeoutField, 1, false)
-                .addComponentFillVertically(new JPanel(), 0)
                 .getPanel();
         contentPanel.setBorder(JBUI.Borders.empty(10));
-        contentPanel.setPreferredSize(new java.awt.Dimension(720, 700));
+        // 面板自然高度约 790px（各分组字段 + 表格 220px）；给足高度，
+        // 避免 GridBag 布局把服务器表格压缩到只剩一两行
+        contentPanel.setPreferredSize(new java.awt.Dimension(720, 880));
         return contentPanel;
     }
 
@@ -246,7 +306,7 @@ public final class MavenDeployConfigurationEditor extends SettingsEditor<MavenDe
      * 多台时汇总已勾选数量与主机名。
      */
     private void updateResolvedTarget() {
-        List<ServerProfile> hosts = hostList.getCheckedItems();
+        List<ServerProfile> hosts = hostTableModel.getCheckedServers();
         String target = targetDirectoryField.getText().trim();
         if (hosts.isEmpty()) {
             resolvedTargetLabel.setText(" ");
@@ -301,13 +361,65 @@ public final class MavenDeployConfigurationEditor extends SettingsEditor<MavenDe
     private void reloadHosts(@Nullable List<String> selectedIds) {
         List<String> checked = selectedIds != null
                 ? selectedIds
-                : hostList.getCheckedItems().stream()
+                : hostTableModel.getCheckedServers().stream()
                         .map(ServerProfile::getId)
                         .collect(java.util.stream.Collectors.toList());
-        hostList.clear();
-        for (ServerProfile profile : ServerProfileService.getInstance().getServers()) {
-            hostList.addItem(profile, profile.getName(), checked.contains(profile.getId()));
+        hostTableModel.setRows(ServerProfileService.getInstance().getServers(), new java.util.HashSet<>(checked));
+    }
+
+    /**
+     * 勾选状态变化后的统一处理：刷新目标目录提示，并通知 IDE 配置已修改。
+     */
+    private void onHostSelectionChanged() {
+        updateResolvedTarget();
+        fireEditorStateChanged();
+    }
+
+    /**
+     * 主机地址文案：多台时只保留首台 + 「等 N 台」，避免单行塞满被截断。
+     */
+    @NotNull
+    private static String hostLabel(@NotNull ServerProfile profile) {
+        List<String> hosts = profile.getHosts();
+        if (hosts.isEmpty()) {
+            return "";
         }
+        if (hosts.size() == 1) {
+            return hosts.get(0);
+        }
+        return hosts.get(0) + " 等 " + hosts.size() + " 台";
+    }
+
+    /**
+     * 生成一个可点击的文本链接（用 {@link JBLabel} 实现，避免依赖平台组件包的版本差异）。
+     */
+    @NotNull
+    private static JBLabel createLinkLabel(@NotNull String text, @NotNull Runnable action) {
+        JBLabel label = new JBLabel("<html><a href='#'>" + text + "</a></html>");
+        label.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        label.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                action.run();
+            }
+        });
+        return label;
+    }
+
+    /**
+     * 全选服务器。服务器较多时一键勾选全部目标，不必逐行点击。
+     */
+    private void selectAllHosts() {
+        hostTableModel.setAllChecked(true);
+        onHostSelectionChanged();
+    }
+
+    /**
+     * 清空已勾选的服务器。
+     */
+    private void clearAllHosts() {
+        hostTableModel.setAllChecked(false);
+        onHostSelectionChanged();
     }
 
     @Nullable
@@ -335,6 +447,95 @@ public final class MavenDeployConfigurationEditor extends SettingsEditor<MavenDe
             return value > 0 ? value : defaultValue;
         } catch (NumberFormatException e) {
             return defaultValue;
+        }
+    }
+
+    /**
+     * 服务器表格模型。第 0 列为勾选列，其余列依次为名称、主机、端口、用户名、远端目录。
+     * 顺序与 {@link ServerProfileService} 保持一致。
+     */
+    private static final class HostTableModel extends AbstractTableModel {
+
+        private static final String[] TITLES = {"", "名称", "主机", "端口", "用户名", "远端目录"};
+
+        private final List<ServerProfile> servers = new ArrayList<>();
+        private boolean[] checked = new boolean[0];
+
+        void setRows(@NotNull List<ServerProfile> servers, @NotNull Set<String> checkedIds) {
+            this.servers.clear();
+            this.servers.addAll(servers);
+            this.checked = new boolean[servers.size()];
+            for (int i = 0; i < servers.size(); i++) {
+                this.checked[i] = checkedIds.contains(servers.get(i).getId());
+            }
+            fireTableDataChanged();
+        }
+
+        /** 切换某行勾选状态。 */
+        void toggle(int row) {
+            if (row < 0 || row >= checked.length) {
+                return;
+            }
+            checked[row] = !checked[row];
+            fireTableRowsUpdated(row, row);
+        }
+
+        void setAllChecked(boolean value) {
+            for (int i = 0; i < checked.length; i++) {
+                checked[i] = value;
+            }
+            fireTableDataChanged();
+        }
+
+        /** 已勾选的服务器，保持表格顺序。 */
+        @NotNull
+        List<ServerProfile> getCheckedServers() {
+            List<ServerProfile> result = new ArrayList<>();
+            for (int i = 0; i < checked.length; i++) {
+                if (checked[i]) {
+                    result.add(servers.get(i));
+                }
+            }
+            return result;
+        }
+
+        @Override
+        public int getRowCount() {
+            return servers.size();
+        }
+
+        @Override
+        public int getColumnCount() {
+            return TITLES.length;
+        }
+
+        @Override
+        public String getColumnName(int column) {
+            return TITLES[column];
+        }
+
+        @Override
+        public Class<?> getColumnClass(int column) {
+            return column == 0 ? Boolean.class : String.class;
+        }
+
+        @Override
+        public boolean isCellEditable(int rowIndex, int columnIndex) {
+            return false;
+        }
+
+        @Override
+        public Object getValueAt(int rowIndex, int columnIndex) {
+            ServerProfile profile = servers.get(rowIndex);
+            return switch (columnIndex) {
+                case 0 -> checked[rowIndex];
+                case 1 -> profile.getName();
+                case 2 -> hostLabel(profile);
+                case 3 -> String.valueOf(profile.getPort());
+                case 4 -> profile.getUsername() == null ? "" : profile.getUsername();
+                case 5 -> profile.getRemoteBaseDir() == null ? "" : profile.getRemoteBaseDir();
+                default -> "";
+            };
         }
     }
 
